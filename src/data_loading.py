@@ -61,27 +61,19 @@ def load_kaggle_customer_profile(
 
     today = pd.Timestamp("today").normalize()
 
-    # ---- engineered features with explicit types for Pylance ----
+    # Vectorised engineered features: age_years and enrol_year
     if "BirthDate" in df.columns:
-
-        def _compute_age(birthdate: object) -> object:
-            if pd.isna(birthdate):
-                return pd.NA
-            ts = cast(pd.Timestamp, birthdate)
-            delta = today - ts  # Timedelta
-            return int(delta.days // 365)
-
-        df["age_years"] = df["BirthDate"].apply(_compute_age).astype("Int64")
+        # Ensure BirthDate is datetime
+        birth = pd.to_datetime(df["BirthDate"], errors="coerce")
+        # today - birth -> TimedeltaIndex; cast to days explicitly
+        age_days_float = (today - birth) / pd.Timedelta(days=1)
+        age_days = pd.to_numeric(age_days_float, errors="coerce").floordiv(1).astype("Int64")
+        df["age_years"] = age_days // 365
 
     if enrol_col in df.columns:
-
-        def _get_year(d: object) -> object:
-            if pd.isna(d):
-                return pd.NA
-            ts = cast(pd.Timestamp, d)
-            return int(ts.year)
-
-        df["enrol_year"] = df[enrol_col].apply(_get_year).astype("Int64")
+        enrol = pd.to_datetime(df[enrol_col], errors="coerce")
+        # Use strftime instead of .dt.year so Pylance doesn't complain
+        df["enrol_year"] = enrol.dt.strftime("%Y").astype("Int64")
 
     return df
 
