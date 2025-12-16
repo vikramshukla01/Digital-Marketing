@@ -1,0 +1,24 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+
+# IDE / tooling
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data / artifacts
+Data/Processed/
+
+# OS noise
+.DS_Store
+Thumbs.db
