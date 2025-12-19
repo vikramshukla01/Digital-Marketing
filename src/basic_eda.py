@@ -40,6 +40,20 @@ def _print_dist_table(name: str, dist_df: pd.DataFrame, key_col: str) -> None:
     print(display.to_string(index=False))
 
 
+def _clean_label_series(s: pd.Series) -> pd.Series:
+    return s.astype(str).str.strip()
+
+
+def _format_label(val) -> str:
+    try:
+        fval = float(val)
+        if fval.is_integer():
+            return str(int(fval))
+    except Exception:
+        pass
+    return str(val)
+
+
 def _missingness_table(df: pd.DataFrame) -> pd.DataFrame:
     total = len(df)
     records = []
@@ -224,7 +238,10 @@ def _value_counts_table(
             "pct": pct.values.astype("float64"),
         }
     )
-    return out
+    return out.sort_values(
+        by=["segment_var", "count", "category"],
+        ascending=[True, False, True],
+    ).reset_index(drop=True)
 
 
 def _print_value_counts_with_pct(s: pd.Series, label: str) -> None:
@@ -237,6 +254,7 @@ def _print_value_counts_with_pct(s: pd.Series, label: str) -> None:
             "pct": pct.values.astype("float64"),
         }
     )
+    out = out.sort_values(by=["count", label], ascending=[False, True]).reset_index(drop=True)
     _print_dist_table(f"{label} (count, pct)", out, label)
 
 
@@ -257,8 +275,9 @@ def eda_kaggle() -> None:
     # Value counts for each segment variable (console + artifact)
     segment_tables: list[pd.DataFrame] = []
     for col in seg_cols:
-        _print_value_counts_with_pct(df[col], col)
-        segment_tables.append(_value_counts_table(df[col], col))
+        cleaned = _clean_label_series(df[col])
+        _print_value_counts_with_pct(cleaned, col)
+        segment_tables.append(_value_counts_table(cleaned, col))
 
     # Age distribution
     age_col = _require_column(df, "age_years")
@@ -317,9 +336,22 @@ def eda_kaggle() -> None:
     # Gender by Status cross-tab
     gender_col = _require_column(df, "GenderCode")
     status_col_for_tab = _require_column(df, "Status")
-    counts = df.groupby([gender_col, status_col_for_tab]).size().reset_index(name="count")
+    counts = (
+        pd.DataFrame(
+            {
+                gender_col: _clean_label_series(df[gender_col]),
+                status_col_for_tab: _clean_label_series(df[status_col_for_tab]),
+            }
+        )
+        .groupby([gender_col, status_col_for_tab])
+        .size()
+        .reset_index(name="count")
+    )
     totals = counts.groupby(gender_col)["count"].transform("sum")
     counts["row_pct"] = counts["count"] / totals
+    counts = counts.sort_values(
+        by=[gender_col, "count", status_col_for_tab], ascending=[True, False, True]
+    ).reset_index(drop=True)
     gender_status_path = out_dir / "kaggle_gender_by_status.csv"
     counts.to_csv(gender_status_path, index=False)
     _print_kv("Saved", gender_status_path.as_posix())
@@ -341,12 +373,13 @@ def eda_hillstrom() -> None:
     df = X.copy()
     df["visit"] = pd.Series(y, index=df.index, name="visit")
     df["treatment_raw"] = pd.Series(t, index=df.index, name="treatment_raw")
+    treatment_clean = _clean_label_series(df["treatment_raw"])
 
-    _print_kv("Number of treatments", df["treatment_raw"].nunique())
+    _print_kv("Number of treatments", treatment_clean.nunique())
 
     # Treatment distribution
-    treat_counts = df["treatment_raw"].value_counts(dropna=False)
-    treat_pct = df["treatment_raw"].value_counts(normalize=True, dropna=False)
+    treat_counts = treatment_clean.value_counts(dropna=False)
+    treat_pct = treatment_clean.value_counts(normalize=True, dropna=False)
     treat_dist = pd.DataFrame(
         {
             "treatment_raw": treat_counts.index.astype(str),
@@ -354,6 +387,7 @@ def eda_hillstrom() -> None:
             "pct": treat_pct.values.astype("float64"),
         }
     )
+    treat_dist = treat_dist.sort_values(by=["treatment_raw"], ascending=True).reset_index(drop=True)
     _print_dist_table("Treatment distribution (count, pct)", treat_dist, "treatment_raw")
 
     # Overall visit rate
@@ -362,11 +396,12 @@ def eda_hillstrom() -> None:
 
     # Visit rate by treatment
     by_treat = (
-        df.groupby("treatment_raw")["visit"]
+        pd.DataFrame({"treatment_raw": treatment_clean, "visit": df["visit"]})
+        .groupby("treatment_raw")["visit"]
         .agg(["mean", "count"])
         .reset_index()
         .rename(columns={"mean": "mean_visit"})
-    )
+    ).sort_values(by=["treatment_raw"], ascending=True).reset_index(drop=True)
     _print_dist_table("Visit rate by treatment (mean, count)", by_treat, "treatment_raw")
 
     # Raw uplift vs control (No E-Mail)
@@ -377,7 +412,8 @@ def eda_hillstrom() -> None:
         print("\n--- Raw uplift vs control (No E-Mail) ---")
         for _, row in by_treat.iterrows():
             uplift = float(row["mean_visit"]) - base
-            _print_kv(f"{row['treatment_raw']} uplift", f"{uplift:.6f}")
+            label = _format_label(row["treatment_raw"])
+            _print_kv(f"{label} uplift", f"{uplift:.6f}")
 
     # Optional narrative-friendly checks
     if "channel" in df.columns:
@@ -419,18 +455,24 @@ def eda_hillstrom() -> None:
     _print_kv("Saved", numeric_summary_path.as_posix())
 
     # Outcome summary with CI
-    outcome_ci = _outcome_summary_with_ci(df, "visit", "treatment_raw", control_value="No E-Mail")
+    ci_df = pd.DataFrame({"treatment_raw": treatment_clean, "visit": df["visit"]})
+    outcome_ci = _outcome_summary_with_ci(ci_df, "visit", "treatment_raw", control_value="No E-Mail")
+    outcome_ci = outcome_ci.sort_values(by=["treatment"], ascending=True).reset_index(drop=True)
     outcome_ci_path = out_dir / "hillstrom_outcome_summary_with_ci.csv"
     outcome_ci.to_csv(outcome_ci_path, index=False)
     _print_kv("Saved", outcome_ci_path.as_posix())
 
     # Balance table (SMD)
     balance_df = _smd_vs_control(
-        pd.concat([X, df["treatment_raw"]], axis=1),
+        pd.concat([X, treatment_clean.rename("treatment_raw")], axis=1),
         treatment_col="treatment_raw",
         control_value="No E-Mail",
         treatment_values=["Mens E-Mail", "Womens E-Mail"],
     )
+    if not balance_df.empty:
+        balance_df = balance_df.assign(smd_abs=balance_df["smd"].abs()).sort_values(
+            by=["treatment", "smd_abs"], ascending=[True, False]
+        ).drop(columns=["smd_abs"]).reset_index(drop=True)
     balance_path = out_dir / "hillstrom_balance_smd_vs_control.csv"
     balance_df.to_csv(balance_path, index=False)
     _print_kv("Saved", balance_path.as_posix())
@@ -459,6 +501,7 @@ def eda_criteo() -> None:
             "pct": treat_pct.values.astype("float64"),
         }
     )
+    treat_dist = treat_dist.sort_values(by=["treatment"], ascending=True).reset_index(drop=True)
     _print_dist_table("Treatment distribution (count, pct)", treat_dist, "treatment")
 
     # Overall conversion rate
@@ -471,7 +514,7 @@ def eda_criteo() -> None:
         .agg(["mean", "count"])
         .reset_index()
         .rename(columns={"mean": "mean_conversion"})
-    )
+    ).sort_values(by=["treatment"], ascending=True).reset_index(drop=True)
     _print_dist_table("Conversion rate by treatment (mean, count)", by_treat, "treatment")
 
     # Raw uplift vs control (0)
@@ -482,7 +525,8 @@ def eda_criteo() -> None:
         print("\n--- Raw uplift vs control (0) ---")
         for _, row in by_treat.iterrows():
             uplift = float(row["mean_conversion"]) - base
-            _print_kv(f"{row['treatment']} uplift", f"{uplift:.6f}")
+            label = _format_label(row["treatment"])
+            _print_kv(f"{label} uplift", f"{uplift:.6f}")
 
     # Sanity summary (numeric columns only)
     print("\n--- Numeric summary (mean, std, min, max) ---")
@@ -523,6 +567,7 @@ def eda_criteo() -> None:
 
     # Outcome summary with CI
     outcome_ci = _outcome_summary_with_ci(df, "conversion", "treatment", control_value=0)
+    outcome_ci = outcome_ci.sort_values(by=["treatment"], ascending=True).reset_index(drop=True)
     outcome_ci_path = out_dir / "criteo_outcome_summary_with_ci.csv"
     outcome_ci.to_csv(outcome_ci_path, index=False)
     _print_kv("Saved", outcome_ci_path.as_posix())
@@ -534,6 +579,10 @@ def eda_criteo() -> None:
         control_value=0,
         treatment_values=[1],
     )
+    if not balance_df.empty:
+        balance_df = balance_df.assign(smd_abs=balance_df["smd"].abs()).sort_values(
+            by=["treatment", "smd_abs"], ascending=[True, False]
+        ).drop(columns=["smd_abs"]).reset_index(drop=True)
     balance_path = out_dir / "criteo_balance_smd.csv"
     balance_df.to_csv(balance_path, index=False)
     _print_kv("Saved", balance_path.as_posix())

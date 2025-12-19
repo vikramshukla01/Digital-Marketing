@@ -39,11 +39,30 @@ def load_kaggle_customer_profile(
     DataFrame
         Customer-level feature table with a few engineered columns.
     """
+    root = Path(__file__).resolve().parents[1]
+    processed = root / "Data" / "Processed" / "kaggle_customer_profile.csv"
+    processed.parent.mkdir(parents=True, exist_ok=True)
+
+    if processed.exists():
+        parse_cols = [c for c in ["BirthDate", "Enrolled on", "Enrolled on "] if c in pd.read_csv(processed, nrows=0).columns]
+        df = pd.read_csv(
+            processed,
+            parse_dates=parse_cols,
+            keep_default_na=True,
+        )
+        for c in ["age_years", "enrol_year"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
+        return df
+
     data_dir = Path(data_dir)
     path = data_dir / filename
 
     if not path.exists():
-        raise FileNotFoundError(f"Could not find Kaggle Excel at: {path}")
+        raise FileNotFoundError(
+            f"Could not find Kaggle Excel at: {path}. "
+            "If this is your first run, execute `python -m src.data_loading` once to build the snapshot."
+        )
 
     df = pd.read_excel(path, sheet_name=sheet_name)
 
@@ -74,6 +93,13 @@ def load_kaggle_customer_profile(
         enrol = pd.to_datetime(df[enrol_col], errors="coerce")
         # Use strftime instead of .dt.year so Pylance doesn't complain
         df["enrol_year"] = enrol.dt.strftime("%Y").astype("Int64")
+
+    # Save snapshot for deterministic reuse
+    try:
+        df.to_csv(processed, index=False)
+    except Exception:
+        # Silent fallback; downstream will still return df
+        pass
 
     return df
 
@@ -138,21 +164,69 @@ def load_criteo(
     t : Series
         Binary treatment indicator.
     """
-    X, y_raw, t_raw = fetch_criteo(
+    processed_dir = _ensure_processed_dir()
+    cache_path = processed_dir / "criteo_conversion_10pct.csv"
+
+    cache_ok = False
+    if percent10 and cache_path.exists():
+        cached = pd.read_csv(cache_path)
+        legacy_target = f"y_{target_col}"
+        if target_col not in cached.columns and legacy_target in cached.columns:
+            cached = cached.rename(columns={legacy_target: target_col})
+            cached.to_csv(cache_path, index=False)
+        if target_col in cached.columns and treatment_col in cached.columns:
+            cache_ok = True
+            X_cached = cached.drop(columns=[target_col, treatment_col])
+            y_cached = cast(Series, cached[target_col])
+            y_cached.name = target_col
+            t_cached = cast(Series, cached[treatment_col])
+            if t_cached.name is None:
+                t_cached.name = treatment_col
+            print(f"Using cached Criteo 10% sample at {cache_path}")
+            return X_cached, y_cached, t_cached
+        else:
+            print(
+                f"Cached file {cache_path} missing required columns; regenerating deterministic 10% sample."
+            )
+
+    data_home = DEFAULT_DATA_DIR / "External"
+    data_home.mkdir(parents=True, exist_ok=True)
+
+    # Fetch full dataset, then create a deterministic 10% slice by sorted index
+    X_full, y_raw, t_raw = fetch_criteo(
         target_col=target_col,
         treatment_col=treatment_col,
         return_X_y_t=True,
-        percent10=percent10,
+        percent10=False,
+        data_home=data_home.as_posix(),
     )
 
-    y = cast(Series, y_raw)
-    y.name = target_col
+    y_full = cast(Series, y_raw)
+    y_full.name = target_col
 
-    t = cast(Series, t_raw)
-    if t.name is None:
-        t.name = treatment_col
+    t_full = cast(Series, t_raw)
+    if t_full.name is None:
+        t_full.name = treatment_col
 
-    return X, y, t
+    if percent10:
+        combined = X_full.copy()
+        combined[target_col] = y_full
+        combined[treatment_col] = t_full
+        n_rows = len(combined)
+        n_take = int(n_rows * 0.10)
+        n_take = max(1, n_take)
+        deterministic_slice = combined.sort_index().iloc[:n_take]
+        deterministic_slice.to_csv(cache_path, index=False)
+        print(f"Created deterministic Criteo 10% sample at {cache_path}")
+        X_out = deterministic_slice.drop(columns=[target_col, treatment_col])
+        y_out = cast(Series, deterministic_slice[target_col])
+        y_out.name = target_col
+        t_out = cast(Series, deterministic_slice[treatment_col])
+        if t_out.name is None:
+            t_out.name = treatment_col
+        return X_out, y_out, t_out
+
+    return X_full, y_full, t_full
 
 
 def _ensure_processed_dir(base: Union[str, Path] = DEFAULT_DATA_DIR) -> Path:

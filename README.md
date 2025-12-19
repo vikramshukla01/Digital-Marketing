@@ -31,6 +31,9 @@ Implemented and reproducible:
 - `Data/Processed/`  
   Auto-generated outputs (snapshots + summary tables). Safe to regenerate.
 
+- `docs/eda_tables.md`  
+  Quick reference for what each summary CSV is used for in reporting.
+
 
 ## Quickstart
 
@@ -88,6 +91,11 @@ This project is about incrementality, not response prediction.
   - Raw uplift vs control
   - Confidence intervals (stability)
   - Balance checks (comparability)
+
+
+## Study Guide alignment
+
+The repository is organized for milestone-driven reporting (progress updates, data analysis, draft report, final report). Running the two entrypoints reproduces deterministic, report-ready tables, so the same artifacts can be cited across progress reports and the final write-up.
 
 
 ## Known Data Quality Issues (Kaggle)
