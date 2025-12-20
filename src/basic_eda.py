@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 import pandas as pd
 
 from src.data_loading import (
@@ -8,17 +7,7 @@ from src.data_loading import (
     load_hillstrom,
     load_criteo,
 )
-
-
-def _project_root() -> Path:
-    # Assumes this file lives in <root>/src/basic_eda.py
-    return Path(__file__).resolve().parents[1]
-
-
-def _processed_dir() -> Path:
-    out_dir = _project_root() / "Data" / "Processed"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir
+from src.paths import outputs_eda_dir
 
 
 def _print_kv(label: str, value) -> None:
@@ -42,16 +31,6 @@ def _print_dist_table(name: str, dist_df: pd.DataFrame, key_col: str) -> None:
 
 def _clean_label_series(s: pd.Series) -> pd.Series:
     return s.astype(str).str.strip()
-
-
-def _format_label(val) -> str:
-    try:
-        fval = float(val)
-        if fval.is_integer():
-            return str(int(fval))
-    except Exception:
-        pass
-    return str(val)
 
 
 def _missingness_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -156,7 +135,7 @@ def _outcome_summary_with_ci(
     control_rate = control_row["rate"] if control_row else None
     control_n = control_row["count"] if control_row else None
     control_se = (
-        (control_rate * (1 - control_rate) / control_n) ** 0.5
+        (control_rate * (1 - control_rate) / control_n) ** 0.5 # pyright: ignore[reportOperatorIssue]
         if control_row and control_n
         else None
     )
@@ -238,10 +217,7 @@ def _value_counts_table(
             "pct": pct.values.astype("float64"),
         }
     )
-    return out.sort_values(
-        by=["segment_var", "count", "category"],
-        ascending=[True, False, True],
-    ).reset_index(drop=True)
+    return out.sort_values(by=["count", "category"], ascending=[False, True]).reset_index(drop=True)
 
 
 def _print_value_counts_with_pct(s: pd.Series, label: str) -> None:
@@ -318,7 +294,7 @@ def eda_kaggle() -> None:
         _print_dist_table("Normalized Living status (count, pct)", living_table, "Living status")
 
     # Missingness and robust summaries
-    out_dir = _processed_dir()
+    out_dir = outputs_eda_dir()
     missing_df = _missingness_table(df)
     missing_path = out_dir / "kaggle_missingness.csv"
     missing_df.to_csv(missing_path, index=False)
@@ -373,7 +349,8 @@ def eda_hillstrom() -> None:
     df = X.copy()
     df["visit"] = pd.Series(y, index=df.index, name="visit")
     df["treatment_raw"] = pd.Series(t, index=df.index, name="treatment_raw")
-    treatment_clean = _clean_label_series(df["treatment_raw"])
+    df["treatment_raw"] = _clean_label_series(df["treatment_raw"])
+    treatment_clean = df["treatment_raw"]
 
     _print_kv("Number of treatments", treatment_clean.nunique())
 
@@ -386,8 +363,7 @@ def eda_hillstrom() -> None:
             "count": treat_counts.values.astype("int64"),
             "pct": treat_pct.values.astype("float64"),
         }
-    )
-    treat_dist = treat_dist.sort_values(by=["treatment_raw"], ascending=True).reset_index(drop=True)
+    ).sort_values(by=["count", "treatment_raw"], ascending=[False, True]).reset_index(drop=True)
     _print_dist_table("Treatment distribution (count, pct)", treat_dist, "treatment_raw")
 
     # Overall visit rate
@@ -412,7 +388,7 @@ def eda_hillstrom() -> None:
         print("\n--- Raw uplift vs control (No E-Mail) ---")
         for _, row in by_treat.iterrows():
             uplift = float(row["mean_visit"]) - base
-            label = _format_label(row["treatment_raw"])
+            label = str(row["treatment_raw"])
             _print_kv(f"{label} uplift", f"{uplift:.6f}")
 
     # Optional narrative-friendly checks
@@ -425,19 +401,13 @@ def eda_hillstrom() -> None:
         print(df["recency"].describe().to_string())
 
     # Save artifacts
-    out_dir = _processed_dir()
+    out_dir = outputs_eda_dir()
 
     visit_by_segment = by_treat.rename(columns={"treatment_raw": "treatment_raw"})
-    (out_dir / "hillstrom_visit_by_segment.csv").write_text(
-        visit_by_segment.to_csv(index=False),
-        encoding="utf-8",
-    )
+    visit_by_segment.to_csv(out_dir / "hillstrom_visit_by_segment.csv", index=False)
     _print_kv("Saved", (out_dir / "hillstrom_visit_by_segment.csv").as_posix())
 
-    (out_dir / "hillstrom_treatment_distribution.csv").write_text(
-        treat_dist.to_csv(index=False),
-        encoding="utf-8",
-    )
+    treat_dist.to_csv(out_dir / "hillstrom_treatment_distribution.csv", index=False)
     _print_kv("Saved", (out_dir / "hillstrom_treatment_distribution.csv").as_posix())
 
     # Missingness and robust summaries
@@ -488,6 +458,7 @@ def eda_criteo() -> None:
     df = X.copy()
     df["conversion"] = pd.Series(y, index=df.index, name="conversion")
     df["treatment"] = pd.Series(t, index=df.index, name="treatment")
+    df["treatment"] = pd.to_numeric(df["treatment"], errors="coerce").astype("Int64")
 
     _print_kv("Number of treatments", df["treatment"].nunique())
 
@@ -500,8 +471,7 @@ def eda_criteo() -> None:
             "count": treat_counts.values.astype("int64"),
             "pct": treat_pct.values.astype("float64"),
         }
-    )
-    treat_dist = treat_dist.sort_values(by=["treatment"], ascending=True).reset_index(drop=True)
+    ).sort_values(by=["count", "treatment"], ascending=[False, True]).reset_index(drop=True)
     _print_dist_table("Treatment distribution (count, pct)", treat_dist, "treatment")
 
     # Overall conversion rate
@@ -525,7 +495,7 @@ def eda_criteo() -> None:
         print("\n--- Raw uplift vs control (0) ---")
         for _, row in by_treat.iterrows():
             uplift = float(row["mean_conversion"]) - base
-            label = _format_label(row["treatment"])
+            label = str(int(row["treatment"])) if pd.notna(row["treatment"]) else str(row["treatment"])
             _print_kv(f"{label} uplift", f"{uplift:.6f}")
 
     # Sanity summary (numeric columns only)
@@ -538,18 +508,12 @@ def eda_criteo() -> None:
         print(summary.to_string())
 
     # Save artifacts
-    out_dir = _processed_dir()
+    out_dir = outputs_eda_dir()
 
-    (out_dir / "criteo_conversion_by_treatment.csv").write_text(
-        by_treat.to_csv(index=False),
-        encoding="utf-8",
-    )
+    by_treat.to_csv(out_dir / "criteo_conversion_by_treatment.csv", index=False)
     _print_kv("Saved", (out_dir / "criteo_conversion_by_treatment.csv").as_posix())
 
-    (out_dir / "criteo_treatment_distribution.csv").write_text(
-        treat_dist.to_csv(index=False),
-        encoding="utf-8",
-    )
+    treat_dist.to_csv(out_dir / "criteo_treatment_distribution.csv", index=False)
     _print_kv("Saved", (out_dir / "criteo_treatment_distribution.csv").as_posix())
 
     # Missingness and robust summaries

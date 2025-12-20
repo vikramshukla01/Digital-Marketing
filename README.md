@@ -29,7 +29,10 @@ Implemented and reproducible:
   Deterministic, reusable EDA module for Kaggle (customer base), Hillstrom (email experiment), and Criteo (ads experiment).
 
 - `Data/Processed/`  
-  Auto-generated outputs (snapshots + summary tables). Safe to regenerate.
+  Step 1 snapshots (cached datasets). Safe to regenerate.
+
+- `Outputs/EDA/`  
+  Step 2 deterministic EDA tables (report-ready CSVs). Safe to regenerate.
 
 - `docs/eda_tables.md`  
   Quick reference for what each summary CSV is used for in reporting.
@@ -55,7 +58,7 @@ Writes:
 ```bash
 python -m src.basic_eda
 ```
-Writes the following (all into `Data/Processed/`):
+Writes the following (all into `Outputs/EDA/`):
 
 **Kaggle (customer base description)**
 - `kaggle_segment_distribution.csv` (Type/Status/GenderCode/Living status counts + pct)

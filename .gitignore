@@ -18,7 +18,9 @@ venv/
 
 # Data / artifacts
 Data/Processed/
+Outputs/
 
 # OS noise
 .DS_Store
 Thumbs.db
+
