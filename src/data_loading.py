@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Tuple, Union, cast
+from typing import Any, Tuple, Union, cast
 
+import numpy as np
 import pandas as pd
 from pandas import DataFrame, Series
 
@@ -16,6 +20,37 @@ TType = Series
 
 # Default data directory (adjust if your layout is different)
 DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "Data"
+
+# Constants for deterministic sampling
+CRITEO_SAMPLE_SEED = 42
+CRITEO_SAMPLE_METHOD = "hash"  # Options: "hash" or "seeded_permutation"
+
+
+def snapshot_hash_df(df: DataFrame) -> str:
+    """
+    Compute SHA256 hash of a DataFrame for integrity checking.
+    
+    Uses stable CSV serialization (no index, Unix line endings).
+    """
+    csv_bytes = df.to_csv(index=False, lineterminator="\n").encode("utf-8")
+    return hashlib.sha256(csv_bytes).hexdigest()
+
+
+def _write_meta_json(path: Path, meta: dict[str, Any]) -> None:
+    """Write metadata JSON file."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2, default=str)
+
+
+def _read_meta_json(path: Path) -> dict[str, Any]:
+    """Read metadata JSON file."""
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _dtypes_summary(df: DataFrame) -> dict[str, str]:
+    """Return dict of column -> dtype as string."""
+    return {col: str(dtype) for col, dtype in df.dtypes.items()}
 
 
 def load_kaggle_customer_profile(
@@ -95,7 +130,7 @@ def load_kaggle_customer_profile(
     return df
 
 
-def load_hillstrom(target_col: str = "visit") -> Tuple[XType, YType, TType]:
+def load_hillstrom(target_col: str = "visit", use_cache: bool = True) -> Tuple[XType, YType, TType]:
     """
     Load the Hillstrom email marketing uplift dataset.
 
@@ -103,6 +138,8 @@ def load_hillstrom(target_col: str = "visit") -> Tuple[XType, YType, TType]:
     ----------
     target_col : {'visit', 'conversion', 'spend'}
         Outcome to model.
+    use_cache : bool, default True
+        If True and cached snapshot exists, load from disk instead of fetching.
 
     Returns
     -------
@@ -113,6 +150,26 @@ def load_hillstrom(target_col: str = "visit") -> Tuple[XType, YType, TType]:
     t : Series
         Treatment assignment (email segment / control).
     """
+    cache_path = data_processed_dir() / f"hillstrom_{target_col}.csv"
+    meta_path = data_processed_dir() / f"hillstrom_{target_col}_meta.json"
+
+    if use_cache and cache_path.exists():
+        cached = pd.read_csv(cache_path)
+        
+        # Identify feature columns (everything except target and treatment_raw)
+        non_feature_cols = [target_col, "treatment_raw"]
+        feature_cols = [c for c in cached.columns if c not in non_feature_cols]
+        
+        X = cached[feature_cols]
+        y = cast(Series, cached[target_col])
+        y.name = target_col
+        t = cast(Series, cached["treatment_raw"])
+        t.name = "segment"
+        
+        print(f"Using cached Hillstrom {target_col} snapshot at {cache_path}")
+        return X, y, t
+
+    # Fetch from sklift
     X, y_raw, t_raw = fetch_hillstrom(
         target_col=target_col,
         return_X_y_t=True,
@@ -126,6 +183,28 @@ def load_hillstrom(target_col: str = "visit") -> Tuple[XType, YType, TType]:
     if t.name is None:
         t.name = "segment"
 
+    # Create combined DataFrame for caching
+    df_cache = X.copy()
+    df_cache[target_col] = y
+    df_cache["treatment_raw"] = t
+    
+    # Save cache
+    df_cache.to_csv(cache_path, index=False)
+    
+    # Compute hash and save meta
+    snapshot_hash = snapshot_hash_df(df_cache)
+    meta = {
+        "dataset": "hillstrom",
+        "target_col": target_col,
+        "n_rows": len(df_cache),
+        "columns": list(df_cache.columns),
+        "dtypes_summary": _dtypes_summary(df_cache),
+        "snapshot_hash": snapshot_hash,
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    _write_meta_json(meta_path, meta)
+    
+    print(f"Created Hillstrom {target_col} snapshot at {cache_path}")
     return X, y, t
 
 
@@ -145,6 +224,7 @@ def load_criteo(
         Name of the treatment column in the returned Series.
     percent10 : bool, default True
         If True, load the 10% sample to keep experiments lightweight.
+        Uses deterministic hash-based sampling for reproducibility.
 
     Returns
     -------
@@ -155,7 +235,8 @@ def load_criteo(
     t : Series
         Binary treatment indicator.
     """
-    cache_path = data_processed_dir() / "criteo_conversion_10pct.csv"
+    cache_path = data_processed_dir() / f"criteo_{target_col}_10pct.csv"
+    meta_path = data_processed_dir() / f"criteo_{target_col}_10pct_meta.json"
 
     if percent10 and cache_path.exists():
         cached = pd.read_csv(cache_path)
@@ -186,23 +267,81 @@ def load_criteo(
         t_full.name = treatment_col
 
     if percent10:
+        # Combine into single DataFrame for sampling
         combined = X_full.copy()
         combined[target_col] = y_full
         combined[treatment_col] = t_full
-        n_rows = len(combined)
-        n_take = max(1, int(n_rows * 0.10))
-        deterministic_slice = combined.sort_index().iloc[:n_take]
-        deterministic_slice.to_csv(cache_path, index=False)
-        print(f"Created deterministic Criteo 10% sample at {cache_path}")
-        X_out = deterministic_slice.drop(columns=[target_col, treatment_col])
-        y_out = cast(Series, deterministic_slice[target_col])
+        
+        n_full = len(combined)
+        
+        # Deterministic hash-based 10% sampling
+        # Method: hash each row and keep rows where hash % 10 == 0
+        if CRITEO_SAMPLE_METHOD == "hash":
+            row_hash = pd.util.hash_pandas_object(combined, index=True).astype("uint64")
+            keep_mask = (row_hash % 10) == 0
+            sampled = combined[keep_mask].reset_index(drop=True)
+            sampling_info = {"method": "hash", "hash_modulo": 10, "keep_value": 0}
+        else:
+            # Alternative: seeded permutation (if hash method not preferred)
+            rng = np.random.RandomState(CRITEO_SAMPLE_SEED)
+            n_take = max(1, int(n_full * 0.10))
+            indices = rng.permutation(n_full)[:n_take]
+            sampled = combined.iloc[indices].reset_index(drop=True)
+            sampling_info = {"method": "seeded_permutation", "seed": CRITEO_SAMPLE_SEED}
+        
+        n_sample = len(sampled)
+        
+        # Save cache
+        sampled.to_csv(cache_path, index=False)
+        
+        # Compute hash and save meta
+        snapshot_hash = snapshot_hash_df(sampled)
+        meta = {
+            "dataset": "criteo",
+            "target_col": target_col,
+            "treatment_col": treatment_col,
+            "sampling": sampling_info,
+            "n_full": n_full,
+            "n_sample": n_sample,
+            "sample_fraction": n_sample / n_full,
+            "columns": list(sampled.columns),
+            "dtypes_summary": _dtypes_summary(sampled),
+            "snapshot_hash": snapshot_hash,
+            "created_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        _write_meta_json(meta_path, meta)
+        
+        print(f"Created deterministic Criteo 10% sample ({sampling_info['method']}) at {cache_path}")
+        print(f"  Full size: {n_full}, Sample size: {n_sample} ({100*n_sample/n_full:.2f}%)")
+        
+        X_out = sampled.drop(columns=[target_col, treatment_col])
+        y_out = cast(Series, sampled[target_col])
         y_out.name = target_col
-        t_out = cast(Series, deterministic_slice[treatment_col])
+        t_out = cast(Series, sampled[treatment_col])
         if t_out.name is None:
             t_out.name = treatment_col
         return X_out, y_out, t_out
 
     return X_full, y_full, t_full
+
+
+def get_snapshot_meta(dataset: str, target_col: str, percent10: bool = True) -> dict[str, Any] | None:
+    """
+    Retrieve metadata for a dataset snapshot if it exists.
+    
+    Returns None if meta file doesn't exist.
+    """
+    if dataset == "hillstrom":
+        meta_path = data_processed_dir() / f"hillstrom_{target_col}_meta.json"
+    elif dataset == "criteo":
+        suffix = "_10pct" if percent10 else ""
+        meta_path = data_processed_dir() / f"criteo_{target_col}{suffix}_meta.json"
+    else:
+        return None
+    
+    if meta_path.exists():
+        return _read_meta_json(meta_path)
+    return None
 
 
 if __name__ == "__main__":
@@ -221,30 +360,24 @@ if __name__ == "__main__":
 
     print("\n=== Hillstrom (visit) ===")
     try:
-        X_h, y_h, t_h = load_hillstrom(target_col="visit")
+        X_h, y_h, t_h = load_hillstrom(target_col="visit", use_cache=False)
         print("X shape:", X_h.shape)
         print("y mean:", float(y_h.mean()))
         print("treatment counts:\n", t_h.value_counts())
-        hill_path = processed_dir / "hillstrom_visit.csv"
-        df_h = X_h.copy()
-        df_h["visit"] = y_h
-        df_h["treatment_raw"] = t_h
-        df_h.to_csv(hill_path, index=False)
-        print("Saved:", hill_path)
     except Exception as exc:  # noqa: BLE001
         print("Hillstrom load FAILED:", exc)
 
     print("\n=== Criteo (conversion, 10%) ===")
     try:
+        # Delete old cache to regenerate with new sampling method
+        old_cache = processed_dir / "criteo_conversion_10pct.csv"
+        if old_cache.exists():
+            old_cache.unlink()
+            print("Deleted old Criteo cache to regenerate with hash-based sampling")
+        
         X_c, y_c, t_c = load_criteo(target_col="conversion", percent10=True)
         print("X shape:", X_c.shape)
         print("y mean:", float(y_c.mean()))
         print("treatment counts:\n", t_c.value_counts())
-        cri_path = processed_dir / "criteo_conversion_10pct.csv"
-        df_c = X_c.copy()
-        df_c["conversion"] = y_c
-        df_c["treatment"] = t_c
-        df_c.to_csv(cri_path, index=False)
-        print("Saved:", cri_path)
     except Exception as exc:  # noqa: BLE001
         print("Criteo load FAILED:", exc)

@@ -1,125 +1,94 @@
-# Digital Marketing Data Loaders
+# Digital Marketing Uplift Pipeline
 
-Centralised dataset access for the Digital Marketing project. Provides reusable helpers to load:
-- Kaggle customer profile Excel (features only, descriptive profiling).
-- Hillstrom (MineThatData) email uplift experiment.
-- Criteo uplift prediction dataset.
+## Project Overview
 
+Marketing teams face a fundamental resource constraint: they cannot contact everyone. When budgets are limited, the question becomes *who* to target—not just who is likely to respond, but who will respond *because* of the outreach. This project implements an end-to-end pipeline for evaluating targeting policies using real experimental data. It compares random, propensity-based, and uplift-based targeting strategies to measure actual incremental impact. The goal is decision quality, not prediction accuracy. The project demonstrates a core applied skill: making defensible decisions under uncertainty when resources are constrained.
 
-## Current Progress (Phase 1)
+---
 
-Implemented and reproducible:
+## Why This Project Exists
 
-- **Step 1 - Data loading + standardization**
-  - All datasets are loaded through `src.data_loading` and standardized into `(X, y, t)` for uplift work (where applicable).
-  - A cached snapshot is saved to `Data/Processed/` for fast iteration and reporting.
+Most marketing analytics focuses on predicting response likelihood: *"Which customers are most likely to convert?"* This sounds reasonable but misses a critical point. Many high-likelihood customers would convert regardless of whether they receive a message. Targeting them wastes budget on outcomes that would have happened anyway—money spent for zero incremental return.
 
-- **Step 2 - Deterministic uplift-oriented EDA (no plots, no models)**
-  - Implemented in `src/basic_eda.py`
-  - Produces clean console summaries + small report-ready CSV tables in `Data/Processed/`
-  - Includes robustness checks: missingness tables, robust numeric summaries (quantiles/IQR), outcome rate CIs, and covariate balance via SMD.
+This project takes a different approach. Instead of predicting who will convert, it estimates who will convert *because of* the intervention. This distinction—between prediction and optimisation—is the difference between forecasting behaviour and improving decisions.
 
+---
 
-## Repository Structure (key parts)
+## Datasets Used
 
-- `src/data_loading.py`  
-  Dataset loaders and standardization helpers.
+This project evaluates targeting strategies on two publicly available experimental datasets:
 
-- `src/basic_eda.py`  
-  Deterministic, reusable EDA module for Kaggle (customer base), Hillstrom (email experiment), and Criteo (ads experiment).
+**Hillstrom Email Campaign**  
+A controlled email marketing experiment with three conditions: Men's promotional email, Women's promotional email, and a holdout control group. The outcome is website visit. This dataset has clear treatment structure and moderate sample size, making it suitable for uplift analysis.
 
-- `Data/Processed/`  
-  Step 1 snapshots (cached datasets). Safe to regenerate.
+**Criteo Advertising Exposure**  
+A large-scale randomised advertising experiment with binary treatment (ad shown vs. not shown) and conversion as the outcome. Effects are small by design, reflecting realistic advertising conditions. This dataset tests whether methods remain stable when incremental effects are marginal.
 
-- `Outputs/EDA/`  
-  Step 2 deterministic EDA tables (report-ready CSVs). Safe to regenerate.
+Using multiple datasets matters. A method that works on one experiment may fail on another. Robustness across datasets provides more credible evidence than strong performance on a single benchmark.
 
-- `docs/eda_tables.md`  
-  Quick reference for what each summary CSV is used for in reporting.
+---
 
+## What Was Evaluated
 
-## Quickstart
+This project compares three targeting policies under budget constraints:
 
-### 1) Install deps (Python 3.10+)
-```bash
-pip install -r requirements.txt
-```
+**Random Targeting**  
+Customers are selected at random. This establishes a baseline: how much incremental value does any targeting provide over no targeting at all?
 
-### 2) Load datasets and write processed snapshots
-```bash
-python -m src.data_loading
-```
-Writes:
-- `Data/Processed/kaggle_customer_profile.csv`
-- `Data/Processed/hillstrom_visit.csv`
-- `Data/Processed/criteo_conversion_10pct.csv`
+**Propensity-Based Targeting**  
+Customers are ranked by predicted probability of conversion, regardless of treatment. This represents the conventional approach: target those most likely to respond.
 
-### 3) Run deterministic EDA and generate report tables
-```bash
-python -m src.basic_eda
-```
-Writes the following (all into `Outputs/EDA/`):
+**Uplift-Based Targeting**  
+Customers are ranked by estimated treatment effect—the predicted difference in conversion probability with versus without the intervention. This prioritises customers who are persuadable, not merely responsive.
 
-**Kaggle (customer base description)**
-- `kaggle_segment_distribution.csv` (Type/Status/GenderCode/Living status counts + pct)
-- `kaggle_missingness.csv`
-- `kaggle_numeric_robust_summary.csv`
-- `kaggle_gender_by_status.csv`
+The evaluation asks: at a fixed budget (e.g., contact the top 10%), which policy produces more incremental conversions? This is a policy comparison, not a model comparison. The focus is on downstream decisions, not upstream predictions. Policy simplicity was a deliberate constraint—these three strategies mirror what most marketing teams would realistically consider.
 
-**Hillstrom (email experiment; visit outcome)**
-- `hillstrom_treatment_distribution.csv`
-- `hillstrom_visit_by_segment.csv`
-- `hillstrom_missingness.csv`
-- `hillstrom_numeric_robust_summary.csv`
-- `hillstrom_outcome_summary_with_ci.csv` (rates + 95% CI + uplift vs control)
-- `hillstrom_balance_smd_vs_control.csv` (covariate balance vs "No E-Mail")
+---
 
-**Criteo (ads experiment; conversion outcome, 10% sample)**
-- `criteo_treatment_distribution.csv`
-- `criteo_conversion_by_treatment.csv`
-- `criteo_missingness.csv`
-- `criteo_numeric_robust_summary.csv`
-- `criteo_outcome_summary_with_ci.csv` (rates + 95% CI + uplift vs control)
-- `criteo_balance_smd.csv` (covariate balance: treatment=1 vs control=0)
+## Key Findings
 
+- Uplift-based targeting outperformed propensity-based targeting in the Hillstrom Women's Email experiment across most budget levels.
+- In the Hillstrom Men's Email experiment, differences between uplift and propensity targeting were smaller and less consistent.
+- In the Criteo dataset, all strategies produced similar results. Incremental effects were small, and no method showed a reliable advantage.
+- Bootstrap confidence intervals revealed that many observed differences were within the range of sampling variability.
+- These results reinforce that uplift modelling is not universally superior. Its value depends on the presence of heterogeneous treatment effects and the ability of the model to detect them.
 
-## What the EDA is proving (and why it matters)
+**Rule of thumb:** Uplift-based targeting helps most when customer responses to treatment vary widely—some are persuadable, others are not. When effects are uniform or very small, likelihood-based targeting is often sufficient and simpler to implement. Budget size also matters: at very high contact rates, strategy differences shrink because most customers are reached regardless of ranking.
 
-This project is about incrementality, not response prediction.
+---
 
-- Hillstrom and Criteo provide treatment/control structure needed for uplift.
-- The EDA tables are built to drop directly into the thesis/report:
-  - Treatment distributions
-  - Baseline outcome rates
-  - Raw uplift vs control
-  - Confidence intervals (stability)
-  - Balance checks (comparability)
+## Repository Structure
 
+| Directory | Purpose |
+|-----------|---------|
+| `src/` | Core pipeline logic. Handles data loading, splitting, modelling, evaluation, and visualisation. |
+| `Data/Processed/` | Cached dataset snapshots. Frozen after initial processing to ensure reproducibility. |
+| `Outputs/EDA/` | Exploratory data analysis tables. Treatment distributions, covariate balance, and missingness summaries. |
+| `Outputs/Models/` | All Step 3 outputs. Scores, targeting simulations, policy tables, curve points, and metrics. |
+| `Outputs/Models/Figures/` | Visualisations. Targeting curves, Qini plots, and score distributions. |
 
-## Study Guide alignment
+---
 
-The repository is organized for milestone-driven reporting (progress updates, data analysis, draft report, final report). Running the two entrypoints reproduces deterministic, report-ready tables, so the same artifacts can be cited across progress reports and the final write-up.
+## Reproducibility and Integrity
 
+This project is designed for full reproducibility:
 
-## Known Data Quality Issues (Kaggle)
+- **Deterministic splits**: Train/validation/test assignments are computed once and saved. Rerunning the pipeline produces identical partitions.
+- **Cached datasets**: Processed data snapshots are stored with integrity hashes. If the underlying data changes, the pipeline refuses to proceed until splits are regenerated.
+- **Fixed random seeds**: All stochastic operations (splitting, bootstrap sampling) use explicit seeds.
+- **Bootstrap uncertainty**: Confidence intervals are computed for all policy comparisons. Results are reported with uncertainty, not as point estimates alone.
 
-- Kaggle is used for customer base description, not uplift estimation.
-- Status label inconsistency (e.g., "InActive" vs "Inactive"), resolved for reporting via normalization.
-- Implausible age outliers (e.g., ages < 18 and > 100 exist). Age is treated as noisy/descriptive only unless cleaned later.
+These safeguards exist because silent changes to data or splits can invalidate results without anyone noticing. The integrity guards make reproducibility failures loud and immediate rather than hidden and dangerous.
 
+---
 
-## Experimental Sanity Checks (Hillstrom + Criteo)
+## Who This Project Is For
 
-To avoid telling causal stories from messy data, EDA includes:
-- Outcome rate + 95% CI per treatment (`*_outcome_summary_with_ci.csv`)
-- Covariate balance via SMD (`*_balance_smd*.csv`)
-- Rule of thumb: max |SMD| < 0.10 indicates good balance.
-- Latest run shows strong balance:
-  - Hillstrom: max |SMD| ~ 0.009
-  - Criteo: max |SMD| ~ 0.047
+This project is relevant to:
 
+- **Data scientists** evaluating causal inference methods for marketing applications.
+- **Marketing analysts** exploring alternatives to response-based targeting.
+- **Decision scientists** interested in policy evaluation under budget constraints.
+- **Growth and experimentation teams** building internal uplift capabilities.
 
-## Next steps
-
-- Uplift modeling (two-model, meta-learners, or tree-based uplift).
-- Evaluation with Qini/uplift curves and policy value estimates.
+The pipeline is structured for extension: additional datasets, learners, or evaluation metrics can be integrated without restructuring the core workflow.
