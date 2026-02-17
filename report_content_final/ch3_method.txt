@@ -1,0 +1,105 @@
+CHAPTER 3: RESEARCH METHODOLOGY
+
+3.1 Alternative Research Methodologies
+
+This section reviews alternative methodological approaches to the research question before justifying the selected approach.
+
+3.1.1 Randomised Controlled Trials
+
+Randomised controlled trials represent the standard for causal inference. By randomly assigning units to treatment and control conditions, RCTs ensure that treatment assignment is independent of potential outcomes, enabling unbiased estimation of average treatment effects (Gutierrez and Gerardy, 2017).
+
+The datasets used in this research (Hillstrom and Criteo) are both derived from randomised experiments, which provides the causal foundation for the analysis. Without randomisation, treatment effect estimates would be confounded by selection bias, rendering the comparison of targeting policies unreliable.
+
+3.1.2 Observational Approaches
+
+Observational approaches to causal inference attempt to estimate treatment effects from non-experimental data using statistical adjustment methods such as regression, matching, or inverse probability weighting. These methods require strong assumptions about confounding that cannot be verified from the data.
+
+Observational approaches were not used in this research because experimental data was available. However, the methods developed here could in principle be extended to observational settings with appropriate adjustments for selection bias.
+
+3.1.3 Machine Learning vs. Traditional Methods
+
+Treatment effect estimation can be approached using either parametric methods or flexible machine learning methods (Kunzel et al., 2019). Each approach involves tradeoffs. Parametric methods offer interpretability and computational efficiency but may fail to capture complex patterns. Machine learning methods can capture non-linear relationships but may overfit in low-signal settings.
+
+This research uses logistic regression as the primary base learner for its transparency and stability.
+
+3.2 Selection of Research Methodology
+
+The selected methodology is a comparative analysis of targeting policies on experimental benchmark data, using meta-learner approaches for uplift estimation and bootstrap methods for uncertainty quantification.
+
+The selection of meta-learner approaches over alternative causal inference methods was driven by practical considerations. Meta-learners leverage existing supervised learning infrastructure, making them accessible for practitioners (Kunzel et al., 2019). The use of separate models for treatment and control groups (T-learner) allows for flexible modelling of heterogeneous response patterns without imposing strong parametric assumptions. Meta-learners provide point estimates of individual-level uplift that can be directly ranked and used for resource allocation.
+
+The research design incorporates multiple datasets to test the generalisability of findings. By comparing results across high-engagement (Hillstrom) and low-engagement (Criteo) contexts, the analysis can identify boundary conditions that moderate method effectiveness.
+
+3.3 Detailed Description of Research Approach
+
+3.3.1 Datasets
+
+The analysis uses two public benchmark datasets with experimental treatment assignment, summarised in Table 3.1.
+
+Table 3.1: Dataset Characteristics
+
+The Hillstrom Email dataset contains 64,000 customer records from an email marketing experiment (Hillstrom, 2008). Customers were randomly assigned to receive a promotional email or no email. The outcome variable is binary: whether the customer visited the website within two weeks. The baseline conversion rate is approximately 15 percent.
+
+The Criteo Uplift dataset contains 2.5 million user records from a display advertising experiment (Diemert, 2018). Users were randomly assigned to see a targeted display advertisement or no advertisement. The outcome variable is binary: whether the user converted. The baseline conversion rate is approximately 0.1 percent.
+
+These datasets represent extremes of a signal-to-noise continuum relevant to the decision problem.
+
+3.3.2 Feature Engineering
+
+Features were restricted to pre-treatment covariates to avoid post-treatment bias. Including variables affected by treatment can induce spurious correlations that distort treatment effect estimates.
+
+For the Hillstrom dataset, covariates include recency, frequency, monetary value, geographic segment, and acquisition channel. These variables capture customer history available prior to the experimental intervention.
+
+For the Criteo dataset, covariates include twelve anonymised variables representing user context. All variables represent pre-treatment information. Feature normalisation was applied to ensure numerical stability.
+
+3.3.3 Propensity Score Estimation
+
+The propensity baseline uses logistic regression to estimate P(Y=1|X), the probability of conversion given customer attributes. The model was fitted on the training set using L2 regularisation with regularisation parameter C equal to 1.0. This regularisation strength was selected as a conservative default to balance underfitting and overfitting without extensive tuning.
+
+3.3.4 Uplift Score Estimation
+
+The primary uplift model is a T-learner using logistic regression as the base learner. The T-learner fits two separate models: mu_0(X) for control and mu_1(X) for treatment. The estimated uplift is tau(X) equals mu_1(X) minus mu_0(X).
+
+The T-learner was selected because it provides a transparent baseline that isolates the treatment effect estimation problem. Model training used the same regularisation settings as the propensity model.
+
+3.3.5 Bootstrap Uncertainty Quantification
+
+Confidence intervals for policy performance are estimated using non-parametric bootstrap resampling. For each of 1,000 bootstrap samples drawn with replacement from the test set, the inverse probability weighting estimator is computed for each policy. The 2.5th and 97.5th percentiles of the bootstrap distribution define the 95 percent confidence interval.
+
+The bootstrap makes minimal assumptions and naturally propagates uncertainty through the entire estimation pipeline (Wu et al., 2023). The choice of 1,000 replicates balances computational cost with statistical precision. The bootstrap procedure was stratified by treatment assignment to maintain original proportions.
+
+3.3.6 Budget-Constrained Policy Evaluation
+
+The evaluation compares three targeting policies at multiple budget levels (10, 20, 30, and 50 percent of population):
+
+Random policy: Contact k percent of customers selected at random.
+
+Propensity policy: Contact the k percent with highest estimated P(Y=1|X).
+
+Uplift policy: Contact the k percent with highest estimated tau(X).
+
+For each policy, incremental outcomes are estimated using inverse probability weighting on the held-out test set.
+
+3.4 Ethical Considerations
+
+This research involves analysis of customer data, which necessitates consideration of privacy and ethical implications.
+
+Both datasets are publicly available benchmarks that have been appropriately anonymised. The datasets contain no personally identifiable information. All customer records are represented by anonymous identifiers, and no attempt was made to re-identify individuals.
+
+Uplift modelling involves differential treatment allocation, which has downstream implications for fairness. Targeting decisions based on predicted responsiveness could correlate with demographic characteristics, raising concerns about equitable treatment. The gender-based segmentation analysis in the Hillstrom dataset was conducted to understand treatment effect heterogeneity. In operational deployments, organisations should monitor for unintended demographic disparities in targeting outcomes.
+
+The methods employed prioritise interpretability. The use of logistic regression ensures that targeting decisions can be audited. Both datasets are used within the terms of their public release for academic research.
+
+3.5 Critical Review of the Chosen Methodology
+
+Several limitations warrant acknowledgment.
+
+First, the reliance on public benchmark datasets limits external validity. The Hillstrom data is from 2008 and may not reflect current customer behaviour. The Criteo data is anonymised in ways that prevent assessment of specific feature meanings.
+
+Second, the use of logistic regression may miss non-linear treatment effect heterogeneity. More flexible learners could potentially capture patterns that logistic regression cannot represent. However, the risk of overfitting in low-signal settings motivated the conservative choice.
+
+Third, the binary outcome formulation ignores potential revenue heterogeneity. Persuadable customers might have different average order values than organic buyers.
+
+Fourth, the analysis assumes that treatment effects are stable over time. Customer behaviour evolves, and models trained on historical data may degrade without periodic retraining.
+
+Despite these limitations, the methodology provides a rigorous foundation for addressing the decision problem. The experimental data enables unbiased causal estimation, and the bootstrap uncertainty quantification appropriately communicates estimation precision.

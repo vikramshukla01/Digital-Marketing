@@ -1,0 +1,8 @@
+References 
+Baier, D., & Stöcker, B. (2022). Profit uplift modeling for direct marketing campaigns: Approaches and applications for online shops. Journal of Business Economics, 92(4), 645–673.
+Diemert, E., Betlei, A., Renaudin, C., & Amini, M.-R. (2018). A large scale benchmark for uplift modeling. In Proceedings of the AdKDD & TargetAd Workshop 2018.
+Gutierrez, P., & Gerardy, J.-Y. (2017). Causal inference and uplift modeling: A review of the literature. In Proceedings of the 3rd International Conference on Predictive Applications and APIs (PMLR Vol. 67, pp. 1–13).
+Hillstrom, K. (2008). MineThatData E-Mail Analytics and Data Mining Challenge [Dataset and description]. MineThatData blog.
+Kedia, S. (n.d.). Email Marketing Data Analysis [Dataset]. Kaggle.
+Radcliffe, N. J., & Surry, P. D. (2011). Real-World Uplift Modelling with Significance-Based Uplift Trees (White Paper TR-2011-1). Stochastic Solutions.
+Rzepakowski, P., & Jaroszewicz, S. (2012). Decision trees for uplift modeling with single and multiple treatments. Knowledge and Information Systems, 32(2), 303–327.
