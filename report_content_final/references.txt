@@ -1,0 +1,29 @@
+REFERENCES
+
+Academic and Methodological Sources
+
+Gutierrez, P. and Gerardy, J.-Y. (2017). Causal inference and uplift modeling: A review of the literature. Proceedings of the 3rd International Conference on Predictive Applications and APIs.
+
+Kunzel, S.R., Sekhon, J.S., Bickel, P.J., and Yu, B. (2019). Metalearners for estimating heterogeneous treatment effects using machine learning. Proceedings of the National Academy of Sciences, 116(10), 4156-4165.
+
+Rzepakowski, P. and Jaroszewicz, S. (2012). Decision trees for uplift modeling. Knowledge and Information Systems, 32(3), 303-327.
+
+Wu, A. et al. (2023). Stable Estimation of Heterogeneous Treatment Effects. MLRP Conference Proceedings.
+
+Baier, D. and Stocker, B. (2022). Profit uplift modeling for direct marketing campaigns. Journal of Business Economics.
+
+Industry Context Sources
+
+Kaushik, A. (2022). Multi-Channel Attribution Modeling: The Good, Bad and Ugly Models. Occam's Razor.
+
+Lifesight (2024). Non-Incremental Conversion: The Hidden Waste in Digital Marketing. Industry White Paper.
+
+CMO Alliance (2025). Your Guide to Marketing Spend and Budget Optimization. CMO Alliance Report.
+
+Adjust (2022). Attribution and Incrementality: Measuring True Campaign Impact. Adjust Technical Documentation.
+
+Dataset Sources
+
+Hillstrom, K. (2008). The MineThatData E-Mail Analytics and Data Mining Challenge. MineThatData.
+
+Diemert, E. (2018). A large scale benchmark for uplift modeling. Criteo AI Lab, AdKDD Workshop.
